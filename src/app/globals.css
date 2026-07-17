@@ -1,0 +1,114 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens derived from docs/design/coffeecong-books-ui-reference.png.
+ * Values are close approximations of the mockup; nudge them to match exact
+ * hex values if a real brand style guide is provided later.
+ */
+@theme {
+  --color-ink: #1b2540;
+  --color-ink-light: #2a3960;
+  --color-paper: #faf6ee;
+  --color-paper-card: #ffffff;
+  --color-paper-warm: #ede1cb;
+  --color-accent: #6f5bd0;
+  --color-accent-hover: #5c48bd;
+  --color-status-public: #3f9d6d;
+  --color-status-private: #d8635f;
+  --color-tag-coral: #f0a8a2;
+
+  --font-sans:
+    var(--font-pretendard), "Apple SD Gothic Neo", "Malgun Gothic",
+    -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+@theme inline {
+  --color-background: var(--color-paper);
+  --color-foreground: var(--color-ink);
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+}
+
+/*
+ * Reader page content (spec §12 pagination exceptions): images keep their
+ * aspect ratio and never overflow the page; tables shrink to fit or fall
+ * back to horizontal scroll rather than blowing out page width; long URLs
+ * wrap instead of forcing the page wider than its container.
+ */
+.reader-content img,
+.reader-image img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 0.5em auto;
+}
+
+.reader-content table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.reader-content a {
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.reader-content p,
+.reader-content blockquote,
+.reader-content li {
+  margin: 0 0 0.85em;
+}
+
+.reader-content h2,
+.reader-content h3,
+.reader-content h4 {
+  margin: 0 0 0.6em;
+}
+
+/* Homepage hero headline — each block fades in, holds, fades out, then
+   loops, on its own delay (set inline per span) so the phrase cascades in
+   sequence on every repeat rather than a one-shot reveal. Delay is only
+   applied before the *first* iteration (CSS semantics), but since every
+   block shares the same cycle duration, that initial phase offset between
+   blocks is preserved on every later loop too — no extra bookkeeping needed. */
+@keyframes hero-block-pulse {
+  0% {
+    opacity: 0;
+    transform: translateY(0.6em);
+  }
+  12% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  80% {
+    opacity: 0;
+    transform: translateY(-0.4em);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-0.4em);
+  }
+}
+
+.hero-block {
+  display: inline-block;
+  opacity: 0;
+  animation: hero-block-pulse 3.6s ease-in-out infinite;
+  animation-delay: var(--hero-delay, 0ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-block {
+    animation: none;
+    opacity: 1;
+  }
+}

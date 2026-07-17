@@ -35,10 +35,13 @@ http://localhost:3000 에서 확인한다.
 ## 스크립트
 
 ```bash
-npm run dev        # 개발 서버
-npm run build       # 프로덕션 빌드
-npm run lint        # ESLint
-npm run typecheck    # TypeScript 타입 검사 (tsc --noEmit)
+npm run dev              # 개발 서버
+npm run build             # 프로덕션 빌드
+npm run lint              # ESLint
+npm run typecheck          # TypeScript 타입 검사 (tsc --noEmit)
+npm test                  # 유닛 테스트 (Vitest)
+npm run test:integration    # 통합 테스트 — 실제 연결된 Supabase 프로젝트 필요
+npm run test:e2e            # E2E 테스트 (Playwright) — 개발 서버 자동 기동
 ```
 
 ## 프로젝트 구조
@@ -53,3 +56,10 @@ docs/design/         UI/UX 참고 이미지
 
 이 프로젝트는 Phase 단위로 순차 개발한다 (`docs/Coffeecong_Books_Claude_Development_Prompt.md` §19).
 현재 상태는 [`todo.md`](todo.md)에서 확인할 수 있다.
+
+## 배포 및 운영 문서
+
+- [관리자 계정 생성](docs/deployment/admin-setup.md)
+- [운영 매뉴얼](docs/deployment/operations-manual.md)
+- [DOCX 작성 가이드](docs/deployment/docx-authoring-guide.md)
+- [백업 및 복구 가이드](docs/deployment/backup-and-recovery.md)

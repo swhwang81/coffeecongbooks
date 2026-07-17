@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 
 /*
  * Design tokens derived from docs/design/coffeecong-books-ui-reference.png.

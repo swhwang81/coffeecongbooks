@@ -2,6 +2,8 @@
 
 import { useRef, useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { BookOpenText } from "lucide-react";
 import { validateDocxFile, DOCX_VALIDATION_MESSAGES, MAX_DOCX_SIZE_BYTES } from "@/lib/upload/docx";
 import { validateCoverFile, COVER_VALIDATION_MESSAGES, MAX_COVER_SIZE_BYTES } from "@/lib/upload/image";
 import { uploadWithProgress, formatBytes } from "@/lib/upload/xhr-upload";
@@ -222,9 +224,20 @@ export function BookForm({ mode, initial }: { mode: "create" | "edit"; initial?:
   return (
     <form onSubmit={handleSubmit}>
       <div className="mt-6 rounded-2xl border border-ink/10 bg-paper-card p-6">
-        <div className="flex items-center gap-2 text-sm font-semibold text-ink">
-          <span className="rounded-full bg-accent/10 px-3 py-1 text-accent">1</span>
-          <span>파일 업로드{mode === "edit" && " (선택 — 비우면 기존 내용 유지)"}</span>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-sm font-semibold text-ink">
+            <span className="rounded-full bg-accent/10 px-3 py-1 text-accent">1</span>
+            <span>파일 업로드{mode === "edit" && " (선택 — 비우면 기존 내용 유지)"}</span>
+          </div>
+          <Link
+            href="/admin/docs/docx-guide"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex shrink-0 items-center gap-1.5 text-xs font-medium text-accent hover:underline"
+          >
+            <BookOpenText className="size-3.5" aria-hidden="true" />
+            DOCX 작성 가이드
+          </Link>
         </div>
 
         <div

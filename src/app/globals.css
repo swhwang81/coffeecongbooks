@@ -34,6 +34,22 @@ body {
 }
 
 /*
+ * Book elevation ("입체감") — react-pageflip renders the actual book at
+ * `.stf__parent`, sized to its exact real pixel box (unlike any of our own
+ * wrapping divs around it, which are deliberately generous/centered and
+ * don't track the book's real edges as `pageBox` reflows). Styling this
+ * class directly is the only way to get a shadow that hugs the real book
+ * regardless of viewport/clamping.
+ */
+.stf__parent {
+  border-radius: 3px;
+  box-shadow:
+    0 30px 60px -15px rgba(0, 0, 0, 0.55),
+    0 10px 24px -8px rgba(0, 0, 0, 0.35),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+/*
  * Reader page content (spec §12 pagination exceptions): images keep their
  * aspect ratio and never overflow the page; tables shrink to fit or fall
  * back to horizontal scroll rather than blowing out page width; long URLs

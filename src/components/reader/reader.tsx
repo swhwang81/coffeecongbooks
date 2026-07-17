@@ -76,6 +76,11 @@ export function Reader({ book }: { book: ReaderBookData }) {
   const [currentPage, setCurrentPage] = useState(0);
   const [startPage, setStartPage] = useState(0);
   const [fullscreenToken, setFullscreenToken] = useState(0);
+  // Top/bottom navy chrome overlays the reading area rather than pushing it
+  // — toggling it must never change the measured page size, or it would
+  // trigger a real repagination (spec §12) on every tap.
+  const [chromeVisible, setChromeVisible] = useState(true);
+  const pageAreaRef = useRef<HTMLDivElement>(null);
 
   // Records one view per Reader mount (spec §17) — not per page turn.
   useEffect(() => {
@@ -264,6 +269,55 @@ export function Reader({ book }: { book: ReaderBookData }) {
   const goPrev = useCallback(() => bookRef.current?.pageFlip()?.flipPrev(), []);
   const goNext = useCallback(() => bookRef.current?.pageFlip()?.flipNext(), []);
 
+  // Tap-zone navigation: the visible page area splits into left/middle/right
+  // thirds — left turns back, right turns forward, middle toggles the navy
+  // chrome. react-pageflip's own click-to-flip has to be pre-empted for this
+  // to be the *only* thing that happens on a tap — see the `mousedown`/
+  // `touchstart` blocker effect below for why (and why `disableFlipByClick`
+  // itself isn't the answer). Real links inside book content
+  // (`clickEventForward`) must still work normally, so clicks on an `<a>`
+  // are left alone (not treated as a nav zone).
+  const handlePageAreaClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if ((e.target as HTMLElement).closest("a")) return;
+      const rect = pageAreaRef.current?.getBoundingClientRect();
+      if (!rect || rect.width === 0) return;
+      const x = e.clientX - rect.left;
+      const third = rect.width / 3;
+      if (x < third) goPrev();
+      else if (x > third * 2) goNext();
+      else setChromeVisible((v) => !v);
+    },
+    [goPrev, goNext]
+  );
+
+  // react-pageflip drives its own click/drag-to-flip off `mousedown`/
+  // `touchstart` listeners attached directly to its internal element (not
+  // `click`), triggering the actual flip later on `mouseup`/`touchend` (on
+  // `window`) — so stopping the `click` event's propagation (tried first)
+  // was already too late; the library's own flip had fired before our click
+  // handler ever ran, producing a double flip per tap. Intercepting at
+  // `mousedown`/`touchstart` in the capture phase, ahead of react-pageflip's
+  // own bubble-phase listener, stops the gesture before it starts — leaving
+  // our tap-zone `onClick` above as the only thing that reacts to a tap.
+  // This does give up react-pageflip's corner-drag gesture inside the page
+  // area, which is an acceptable trade for tap-zone navigation being the
+  // primary way pages turn now.
+  useEffect(() => {
+    function blockPageFlipGesture(e: Event) {
+      const target = e.target as HTMLElement;
+      if (pageAreaRef.current?.contains(target) && !target.closest("a")) {
+        e.stopPropagation();
+      }
+    }
+    window.addEventListener("mousedown", blockPageFlipGesture, { capture: true });
+    window.addEventListener("touchstart", blockPageFlipGesture, { capture: true });
+    return () => {
+      window.removeEventListener("mousedown", blockPageFlipGesture, { capture: true });
+      window.removeEventListener("touchstart", blockPageFlipGesture, { capture: true });
+    };
+  }, []);
+
   // page-flip.js's flip(page)/flipToPage() only ever animates ONE spread
   // step: it silently teleports `currentSpreadIndex` to `next - 1` and then
   // calls flipNext()/flipPrev() once (Flip.flipToPage), so jumps spanning
@@ -405,24 +459,50 @@ export function Reader({ book }: { book: ReaderBookData }) {
     // that lets the page grow taller than the viewport) — see the bug
     // this fixed, below.
     <div className="flex h-dvh flex-col bg-ink/90">
-      <div ref={frameRef} className="flex flex-1 flex-col overflow-hidden bg-ink">
-        <ReaderToolbar
-          variant={isDesktop ? "desktop" : "mobile"}
-          title={currentChapterTitle}
-          onBack={() => router.push("/books")}
-          onToggleToc={() => setTocOpen(true)}
-          onOpenSettings={() => setSettingsOpen(true)}
-          onOpenShare={book.allowShare && book.shareUrl ? () => setShareOpen(true) : undefined}
-          fontSize={fontSize}
-          onFontSizeChange={clampFontSize}
-          lineHeight={lineHeight}
-          onLineHeightChange={clampLineHeight}
-          theme={theme}
-          onThemeChange={setTheme}
-          onReset={resetSettings}
-          isFullscreen={isFullscreen}
-          onToggleFullscreen={toggleFullscreen}
-        />
+      {/*
+        The frame itself (not just the toolbar/bottom-bar content) recolors
+        when the chrome is hidden — matching the book's own page color
+        instead of staying navy — so a middle-tap reads as "the book now
+        fills the whole screen" rather than just "the menu went away with a
+        navy void still framing it."
+      */}
+      <div
+        ref={frameRef}
+        className="flex flex-1 flex-col overflow-hidden transition-colors duration-300"
+        style={{ backgroundColor: chromeVisible ? "var(--color-ink)" : themeStyle.bg }}
+      >
+        {/*
+          Fixed-height wrapper (never resizes) so toggling `chromeVisible`
+          only fades/slides the bar's *contents* — the row's own height stays
+          constant, which keeps `wrapperRef`'s measured rect stable below. If
+          this row's height changed on toggle, every chrome tap would also
+          trigger a real repagination (spec §12 ties recompute to actual
+          container-size changes), which isn't the intent of a tap-to-hide-UI
+          gesture.
+        */}
+        <div className="shrink-0 overflow-hidden">
+          <div
+            className={`transition-all duration-300 ${chromeVisible ? "translate-y-0 opacity-100" : "pointer-events-none -translate-y-full opacity-0"}`}
+          >
+            <ReaderToolbar
+              variant={isDesktop ? "desktop" : "mobile"}
+              title={currentChapterTitle}
+              onBack={() => router.push("/books")}
+              onToggleToc={() => setTocOpen(true)}
+              onOpenSettings={() => setSettingsOpen(true)}
+              onOpenShare={book.allowShare && book.shareUrl ? () => setShareOpen(true) : undefined}
+              fontSize={fontSize}
+              onFontSizeChange={clampFontSize}
+              lineHeight={lineHeight}
+              onLineHeightChange={clampLineHeight}
+              theme={theme}
+              onThemeChange={setTheme}
+              onReset={resetSettings}
+              isFullscreen={isFullscreen}
+              onToggleFullscreen={toggleFullscreen}
+            />
+          </div>
+        </div>
 
         {/*
           `wrapperRef` (used for pagination measurement) lives on THIS row,
@@ -448,6 +528,14 @@ export function Reader({ book }: { book: ReaderBookData }) {
           this element's own `overflow-hidden` instead of growing the page.
         */}
         <div ref={wrapperRef} className="relative flex flex-1 justify-center overflow-hidden px-2 pb-2 sm:px-6">
+          {/* Soft spotlight behind the book — purely decorative depth cue,
+              independent of the book's real pixel box (see `.stf__parent`
+              in globals.css for the shadow that actually hugs it). */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_45%,rgba(0,0,0,0.3)_100%)]"
+          />
+
           {isDesktop && (
             <button
               type="button"
@@ -459,7 +547,7 @@ export function Reader({ book }: { book: ReaderBookData }) {
             </button>
           )}
 
-          <div className="h-full max-h-[720px] w-full max-w-5xl">
+          <div ref={pageAreaRef} onClick={handlePageAreaClick} className="h-full max-h-[720px] w-full max-w-5xl">
             {pageBox && (
               <HTMLFlipBook
                 key={flipbookKey}
@@ -494,15 +582,21 @@ export function Reader({ book }: { book: ReaderBookData }) {
           )}
         </div>
 
-        <ReaderBottomBar
-          variant={isDesktop ? "desktop" : "mobile"}
-          currentPage={currentPage}
-          totalPages={pages.length}
-          onPrev={goPrev}
-          onNext={goNext}
-          onSeek={goTo}
-          onToggleToc={() => setTocOpen(true)}
-        />
+        <div className="shrink-0 overflow-hidden">
+          <div
+            className={`transition-all duration-300 ${chromeVisible ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-full opacity-0"}`}
+          >
+            <ReaderBottomBar
+              variant={isDesktop ? "desktop" : "mobile"}
+              currentPage={currentPage}
+              totalPages={pages.length}
+              onPrev={goPrev}
+              onNext={goNext}
+              onSeek={goTo}
+              onToggleToc={() => setTocOpen(true)}
+            />
+          </div>
+        </div>
       </div>
 
       {tocOpen && (

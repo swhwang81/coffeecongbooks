@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
@@ -23,10 +23,14 @@ const HTMLFlipBook = dynamic(() => import("react-pageflip"), { ssr: false }) as 
 
 export type ReaderTheme = "light" | "sepia" | "dark";
 
-const THEME_STYLES: Record<ReaderTheme, { bg: string; text: string }> = {
-  light: { bg: "#faf6ee", text: "#1b2540" },
-  sepia: { bg: "#f1e4c8", text: "#3a2e1f" },
-  dark: { bg: "#1b2233", text: "#e8e6df" },
+// `heading` is deliberately more emphasized than `text` per theme — darker
+// for the light/sepia (dark-on-light) themes, brighter for dark (light-on-
+// dark) — so chapter/section titles read as visibly distinct from a
+// standard/plain document rather than just a bigger version of body text.
+const THEME_STYLES: Record<ReaderTheme, { bg: string; text: string; heading: string }> = {
+  light: { bg: "#faf6ee", text: "#1b2540", heading: "#0a0f1f" },
+  sepia: { bg: "#f1e4c8", text: "#3a2e1f", heading: "#1f160c" },
+  dark: { bg: "#1b2233", text: "#e8e6df", heading: "#ffffff" },
 };
 
 // Center tap-zone gesture thresholds (see the pointer handlers in `Reader`
@@ -518,7 +522,13 @@ export function Reader({ book }: { book: ReaderBookData }) {
       <div key={pageIndex} className="page h-full w-full">
         <div
           className={`flex h-full w-full flex-col ${PAGE_PADDING_CLASS}`}
-          style={{ background: themeStyle.bg, color: themeStyle.text }}
+          style={
+            {
+              background: themeStyle.bg,
+              color: themeStyle.text,
+              "--reader-heading-color": themeStyle.heading,
+            } as CSSProperties
+          }
         >
           <div
             className={READER_CONTENT_CLASS}

@@ -81,10 +81,29 @@ body {
   margin: 0 0 0.85em;
 }
 
+.reader-content h1,
 .reader-content h2,
 .reader-content h3,
 .reader-content h4 {
   margin: 0 0 0.6em;
+}
+
+/*
+ * Chapter/section headings (spec §10 style-map targets: h1.book-title,
+ * h2.chapter-title, h3.section-title, h4.subsection-title) read as visibly
+ * heavier and darker/brighter than body text — not just a bigger font size
+ * — so they stand out from a plain/standard document. `--reader-heading-color`
+ * is set per reading theme (light/sepia/dark) alongside the page background
+ * in reader.tsx, since a single fixed color would fail contrast on at least
+ * one theme (dark text would vanish on the dark theme's dark background).
+ */
+.reader-content .book-title,
+.reader-content .chapter-title,
+.reader-content .section-title,
+.reader-content .subsection-title {
+  color: var(--reader-heading-color, currentColor);
+  font-weight: 800;
+  letter-spacing: -0.01em;
 }
 
 /* Homepage hero headline — each block fades in, holds, fades out, then

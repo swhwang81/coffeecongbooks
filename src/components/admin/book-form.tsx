@@ -474,11 +474,21 @@ export function BookForm({ mode, initial }: { mode: "create" | "edit"; initial?:
               </div>
             ) : previewHtml ? (
               <div className="prose max-w-none text-sm">
+                {/*
+                  The scroll clamp (`max-h-64 overflow-y-auto`) already limits
+                  how much is visible — an earlier `.substring(0, 2000)` on
+                  the HTML *string* was redundant for that and actively
+                  harmful: cutting raw HTML at a fixed character offset can
+                  slice straight through a tag (most visibly an `<img>`
+                  appearing after that point, or with its `src` cut
+                  mid-attribute), so it silently disappeared from the
+                  preview even though the real saved content_html was
+                  complete and correct.
+                */}
                 <div
                   className="space-y-3 overflow-y-auto rounded-lg bg-ink/5 p-4 max-h-64 text-ink text-sm"
-                  dangerouslySetInnerHTML={{ __html: previewHtml.substring(0, 2000) }}
+                  dangerouslySetInnerHTML={{ __html: previewHtml }}
                 />
-                <p className="mt-2 text-xs text-ink/50">※ 처음 2000자까지만 표시됩니다</p>
                 {previewWarnings.length > 0 && (
                   <ul className="mt-3 space-y-1 text-xs text-amber-700">
                     {previewWarnings.map((w, i) => (

@@ -40,6 +40,16 @@ describe("sanitizeDocxHtml", () => {
     expect(html).not.toContain("class=");
   });
 
+  it("keeps class on headings — it's how the style map's book-title/chapter-title/section-title/subsection-title reach the Reader's heading-emphasis CSS", () => {
+    const { html } = sanitizeDocxHtml(
+      '<h1 class="book-title">A</h1><h2 class="chapter-title">B</h2><h3 class="section-title">C</h3><h4 class="subsection-title">D</h4>'
+    );
+    expect(html).toContain('h1 class="book-title"');
+    expect(html).toContain('h2 class="chapter-title"');
+    expect(html).toContain('h3 class="section-title"');
+    expect(html).toContain('h4 class="subsection-title"');
+  });
+
   it("keeps allowed tags and attributes untouched", () => {
     const { html, removedTags } = sanitizeDocxHtml(
       '<h1>Title</h1><p><strong>bold</strong> and <a href="https://example.com">link</a></p>'

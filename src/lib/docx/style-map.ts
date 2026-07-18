@@ -11,18 +11,17 @@ export const DOCX_STYLE_MAP = [
   "p[style-name='Quote'] => blockquote:fresh",
   "p[style-name='Intense Quote'] => blockquote:fresh",
 
-  // Korean style names — Word/한글(HWP)-derived templates are inconsistent
-  // about whether there's a space between "제목" and the level number
-  // (e.g. '제목 2' vs '제목2'), so both forms map to the same semantic tag.
+  // Korean style names. Word appends a numeric suffix ("제목2", "인용1", ...)
+  // whenever a style name collides with one already in the document — this
+  // map only needs the canonical forms; style-normalize.ts's
+  // transformDocument hook rewrites any numbered variant (however high —
+  // there's no cap on Word's suffix) down to one of these before this map
+  // ever runs, so it doesn't need to enumerate them.
   "p[style-name='제목'] => h1.book-title:fresh",
   "p[style-name='제목 1'] => h2.chapter-title:fresh",
-  "p[style-name='제목1'] => h2.chapter-title:fresh",
   "p[style-name='제목 2'] => h3.section-title:fresh",
-  "p[style-name='제목2'] => h3.section-title:fresh",
   "p[style-name='제목 3'] => h4.subsection-title:fresh",
-  "p[style-name='제목3'] => h4.subsection-title:fresh",
   "p[style-name='인용'] => blockquote:fresh",
-  "p[style-name='인용1'] => blockquote:fresh",
   "p[style-name='강조 인용'] => blockquote:fresh",
 
   // '기본' is a Word/한글 "Normal"-equivalent body style with no semantic

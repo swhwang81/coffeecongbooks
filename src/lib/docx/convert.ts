@@ -1,6 +1,7 @@
 import mammoth from "mammoth";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { DOCX_STYLE_MAP } from "./style-map";
+import { normalizeDocxStyles } from "./style-normalize";
 import { createImageCollector, uploadDocxImages, resolveImagePlaceholders, type ExtractedImage } from "./images";
 import { sanitizeDocxHtml } from "./sanitize";
 import { buildBlocks, type Block, type TocEntry } from "./blocks";
@@ -67,7 +68,7 @@ export async function convertDocxToBookContent(
   try {
     const result = await mammoth.convertToHtml(
       { buffer },
-      { styleMap: DOCX_STYLE_MAP, convertImage: createImageCollector(images) }
+      { styleMap: DOCX_STYLE_MAP, convertImage: createImageCollector(images), transformDocument: normalizeDocxStyles }
     );
     rawHtml = result.value;
     warnings.push(...result.messages.filter((m) => m.type === "warning").map((m) => m.message));

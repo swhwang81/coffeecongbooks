@@ -43,6 +43,16 @@ const ALLOWED_ATTRS: Record<string, string[]> = {
   table: [],
   th: ["colspan", "rowspan"],
   td: ["colspan", "rowspan"],
+  // `class` on headings is the *only* way the Reader's heading-emphasis
+  // styling (globals.css's .book-title/.chapter-title/.section-title/
+  // .subsection-title rules) ever reaches real content — the style-map
+  // (spec §10) is what assigns these, always one of exactly those four
+  // literal values, never anything derived from the document itself, so
+  // there's no injection surface here to worry about.
+  h1: ["class"],
+  h2: ["class"],
+  h3: ["class"],
+  h4: ["class"],
 };
 
 function isSafeUrl(value: string): boolean {

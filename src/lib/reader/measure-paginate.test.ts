@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { findPageForPosition, type ReaderPage } from "./measure-paginate";
+import { findPageForPosition, paginateBlocks, type ReaderPage } from "./measure-paginate";
+import type { Block } from "@/lib/docx/blocks";
 
 // `paginateBlocks` itself needs real layout measurement (scrollHeight/
 // clientHeight), which jsdom doesn't implement — it always reports 0, so
@@ -56,5 +57,62 @@ describe("findPageForPosition", () => {
   it("returns undefined for a block id that resolves nowhere", () => {
     const pages = [page([])];
     expect(findPageForPosition(pages, "ghost", 0, new Map())).toBeUndefined();
+  });
+});
+
+describe("paginateBlocks — chapter headings force a page break", () => {
+  // jsdom always reports scrollHeight/clientHeight as 0, so `fits()`
+  // (`scrollHeight <= clientHeight + 1`) is trivially true for any content
+  // — meaningless for testing overflow-driven breaks, but that also means
+  // the *only* thing that can force a break in this environment is the
+  // explicit, measurement-independent "chapter heading always starts fresh"
+  // rule this test targets. Any actual overflow behavior stays covered by
+  // the Playwright E2E suite, per the module comment above.
+  function heading(id: string, level: 1 | 2 | 3 | 4, text: string): Block {
+    const tag = `h${level}`;
+    return { id, type: "heading", level, html: `<${tag} data-block-id="${id}">${text}</${tag}>` };
+  }
+
+  function paragraph(id: string, text: string): Block {
+    return { id, type: "paragraph", html: `<p data-block-id="${id}">${text}</p>` };
+  }
+
+  it("starts a new page at a level-2 (chapter) heading even though it would otherwise fit", () => {
+    const container = document.createElement("div");
+    const blocks: Block[] = [paragraph("p1", "intro"), heading("h1", 2, "Chapter One"), paragraph("p2", "body")];
+
+    const { pages } = paginateBlocks(blocks, container);
+
+    // pages[0] is always the synthetic cover page.
+    expect(pages[1].blockIds).toEqual(["p1"]);
+    expect(pages[2].blockIds).toEqual(["h1", "p2"]);
+  });
+
+  it("does not force a break for level-1/3/4 headings", () => {
+    const container = document.createElement("div");
+    const blocks: Block[] = [paragraph("p1", "intro"), heading("h1", 3, "Section"), paragraph("p2", "body")];
+
+    const { pages } = paginateBlocks(blocks, container);
+
+    expect(pages[1].blockIds).toEqual(["p1", "h1", "p2"]);
+  });
+
+  it("a chapter heading right at the very start of the book doesn't produce a spurious empty page", () => {
+    const container = document.createElement("div");
+    const blocks: Block[] = [heading("h1", 2, "Chapter One"), paragraph("p1", "body")];
+
+    const { pages } = paginateBlocks(blocks, container);
+
+    expect(pages[1].blockIds).toEqual(["h1", "p1"]);
+  });
+
+  it("back-to-back chapter headings each get their own page", () => {
+    const container = document.createElement("div");
+    const blocks: Block[] = [heading("h1", 2, "Chapter One"), heading("h2", 2, "Chapter Two")];
+
+    const { pages } = paginateBlocks(blocks, container);
+
+    expect(pages[1].blockIds).toEqual(["h1"]);
+    expect(pages[2].blockIds).toEqual(["h2"]);
   });
 });

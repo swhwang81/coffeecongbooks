@@ -76,15 +76,27 @@ export function paginateBlocks(blocks: Block[], container: HTMLElement): Paginat
   // Queue so a split block's tail can be re-processed as if it were the
   // next block. `wordOffset` tracks how many words of the *original* block
   // were already consumed by earlier fragments, for position restore.
-  const queue: Array<{ id: string; type: string; html: string; wordOffset: number }> = blocks.map((b) => ({
-    id: b.id,
-    type: b.type,
-    html: blockHtml(b),
-    wordOffset: 0,
-  }));
+  const queue: Array<{ id: string; type: string; level?: 1 | 2 | 3 | 4; html: string; wordOffset: number }> =
+    blocks.map((b) => ({
+      id: b.id,
+      type: b.type,
+      level: b.type === "heading" ? b.level : undefined,
+      html: blockHtml(b),
+      wordOffset: 0,
+    }));
 
   while (queue.length > 0) {
     const block = queue.shift()!;
+
+    // Chapter headings ("제목 1" style → h2.chapter-title, level 2) always
+    // start a fresh page — never share a page with whatever precedes them,
+    // even when there'd be room. `commitPage()` is already a no-op on an
+    // empty page (nothing to force a break *out of* right after the cover
+    // or a previous forced break), so no extra guard is needed here.
+    if (block.type === "heading" && block.level === 2) {
+      commitPage();
+    }
+
     const candidate = currentHtml + block.html;
 
     if (fits(candidate)) {

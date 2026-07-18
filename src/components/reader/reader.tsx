@@ -29,6 +29,15 @@ const THEME_STYLES: Record<ReaderTheme, { bg: string; text: string }> = {
   dark: { bg: "#1b2233", text: "#e8e6df" },
 };
 
+// Center tap-zone gesture thresholds (see the pointer handlers in `Reader`
+// below) — movement below this counts as a stationary tap, at/above the
+// swipe minimum (whichever of the fixed px floor or the fraction of the
+// book's own width is larger) counts as an intentional swipe. Anything in
+// between is an ambiguous wobble and is deliberately ignored.
+const CENTER_TAP_MAX_PX = 10;
+const CENTER_SWIPE_MIN_PX = 50;
+const CENTER_SWIPE_MIN_WIDTH_RATIO = 0.15;
+
 const DESKTOP_MIN_FONT_SIZE = 15;
 // Spec §11 "모바일: 최소 본문 17px" — mobile never goes below this, even
 // via the A- stepper.
@@ -269,53 +278,64 @@ export function Reader({ book }: { book: ReaderBookData }) {
   const goPrev = useCallback(() => bookRef.current?.pageFlip()?.flipPrev(), []);
   const goNext = useCallback(() => bookRef.current?.pageFlip()?.flipNext(), []);
 
-  // Tap-zone navigation: the visible page area splits into left/middle/right
-  // thirds — left turns back, right turns forward, middle toggles the navy
-  // chrome. react-pageflip's own click-to-flip has to be pre-empted for this
-  // to be the *only* thing that happens on a tap — see the `mousedown`/
-  // `touchstart` blocker effect below for why (and why `disableFlipByClick`
-  // itself isn't the answer). Real links inside book content
-  // (`clickEventForward`) must still work normally, so clicks on an `<a>`
-  // are left alone (not treated as a nav zone).
-  const handlePageAreaClick = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      if ((e.target as HTMLElement).closest("a")) return;
-      const rect = pageAreaRef.current?.getBoundingClientRect();
-      if (!rect || rect.width === 0) return;
-      const x = e.clientX - rect.left;
-      const third = rect.width / 3;
-      if (x < third) goPrev();
-      else if (x > third * 2) goNext();
-      else setChromeVisible((v) => !v);
+  // Left/right third navigation + the real finger-following page-fold
+  // animation are both handled entirely by react-pageflip's own native
+  // click/drag gesture, left completely unblocked (`disableFlipByClick`
+  // stays `false`, its original value): with that setting off, its click
+  // direction is a plain 50/50 split of the *whole* book's bounds (not a
+  // "near a corner" requirement — that check only applies when
+  // `disableFlipByClick` is on), so our left third is a strict subset of its
+  // "prev" half and our right third a strict subset of its "next" half.
+  // Reimplementing that gesture ourselves was tried first (see git history)
+  // and gave up the real fold visual for no benefit, since react-pageflip
+  // already does exactly what we want here for free.
+  //
+  // The only thing react-pageflip has no concept of is a center dead-zone,
+  // so the middle third alone gets a small transparent overlay (below,
+  // rendered inside `pageAreaRef`) that physically sits on top of the book
+  // there — normal DOM hit-testing means react-pageflip's own listeners
+  // never even receive events that land on it, no propagation tricks
+  // needed. Pointer Capture on that overlay means a gesture that *starts*
+  // in the center third keeps reporting to it even if the finger drags out
+  // past the overlay's own edges, so a swipe starting dead-center still
+  // navigates — just without the live fold visual, since that portion of
+  // the gesture never reaches react-pageflip's own element at all.
+  const centerDragRef = useRef<{ x: number; y: number; pointerId: number } | null>(null);
+
+  const handleCenterPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest("a")) return;
+    centerDragRef.current = { x: e.clientX, y: e.clientY, pointerId: e.pointerId };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }, []);
+
+  const handleCenterPointerUp = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      const start = centerDragRef.current;
+      centerDragRef.current = null;
+      if (!start || start.pointerId !== e.pointerId) return;
+
+      const deltaX = e.clientX - start.x;
+      const deltaY = e.clientY - start.y;
+
+      if (Math.abs(deltaX) < CENTER_TAP_MAX_PX && Math.abs(deltaY) < CENTER_TAP_MAX_PX) {
+        setChromeVisible((v) => !v);
+        return;
+      }
+
+      const rectWidth = pageAreaRef.current?.getBoundingClientRect().width ?? 0;
+      const swipeThreshold = Math.max(CENTER_SWIPE_MIN_PX, rectWidth * CENTER_SWIPE_MIN_WIDTH_RATIO);
+      if (Math.abs(deltaX) >= swipeThreshold && Math.abs(deltaX) > Math.abs(deltaY) * 1.5) {
+        if (deltaX < 0) goNext();
+        else goPrev();
+      }
+      // Anything smaller than a real swipe but past the tap threshold is an
+      // ambiguous wobble — deliberately does nothing.
     },
     [goPrev, goNext]
   );
 
-  // react-pageflip drives its own click/drag-to-flip off `mousedown`/
-  // `touchstart` listeners attached directly to its internal element (not
-  // `click`), triggering the actual flip later on `mouseup`/`touchend` (on
-  // `window`) — so stopping the `click` event's propagation (tried first)
-  // was already too late; the library's own flip had fired before our click
-  // handler ever ran, producing a double flip per tap. Intercepting at
-  // `mousedown`/`touchstart` in the capture phase, ahead of react-pageflip's
-  // own bubble-phase listener, stops the gesture before it starts — leaving
-  // our tap-zone `onClick` above as the only thing that reacts to a tap.
-  // This does give up react-pageflip's corner-drag gesture inside the page
-  // area, which is an acceptable trade for tap-zone navigation being the
-  // primary way pages turn now.
-  useEffect(() => {
-    function blockPageFlipGesture(e: Event) {
-      const target = e.target as HTMLElement;
-      if (pageAreaRef.current?.contains(target) && !target.closest("a")) {
-        e.stopPropagation();
-      }
-    }
-    window.addEventListener("mousedown", blockPageFlipGesture, { capture: true });
-    window.addEventListener("touchstart", blockPageFlipGesture, { capture: true });
-    return () => {
-      window.removeEventListener("mousedown", blockPageFlipGesture, { capture: true });
-      window.removeEventListener("touchstart", blockPageFlipGesture, { capture: true });
-    };
+  const handleCenterPointerCancel = useCallback(() => {
+    centerDragRef.current = null;
   }, []);
 
   // page-flip.js's flip(page)/flipToPage() only ever animates ONE spread
@@ -547,7 +567,7 @@ export function Reader({ book }: { book: ReaderBookData }) {
             </button>
           )}
 
-          <div ref={pageAreaRef} onClick={handlePageAreaClick} className="h-full max-h-[720px] w-full max-w-5xl">
+          <div ref={pageAreaRef} className="relative h-full max-h-[720px] w-full max-w-5xl">
             {pageBox && (
               <HTMLFlipBook
                 key={flipbookKey}
@@ -568,6 +588,19 @@ export function Reader({ book }: { book: ReaderBookData }) {
                 {pages.map((_, i) => renderPageContent(i))}
               </HTMLFlipBook>
             )}
+
+            {/* Center third only — see the comment above `centerDragRef`
+                for why react-pageflip is left fully unblocked everywhere
+                else. `touchAction: none` stops the browser from starting
+                its own scroll/gesture here before our pointer handlers get
+                a chance to see the move. */}
+            <div
+              onPointerDown={handleCenterPointerDown}
+              onPointerUp={handleCenterPointerUp}
+              onPointerCancel={handleCenterPointerCancel}
+              className="absolute inset-y-0 left-1/3 z-30 w-1/3"
+              style={{ touchAction: "none" }}
+            />
           </div>
 
           {isDesktop && (

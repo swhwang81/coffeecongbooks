@@ -7,6 +7,7 @@ import { BookOpenText } from "lucide-react";
 import { validateDocxFile, DOCX_VALIDATION_MESSAGES, MAX_DOCX_SIZE_BYTES } from "@/lib/upload/docx";
 import { validateCoverFile, COVER_VALIDATION_MESSAGES, MAX_COVER_SIZE_BYTES } from "@/lib/upload/image";
 import { uploadWithProgress, formatBytes } from "@/lib/upload/xhr-upload";
+import { uploadFileDirect } from "@/lib/upload/direct-upload";
 import type { BookStatus, BookVisibility } from "@/lib/supabase/types";
 
 interface Taxonomy {
@@ -71,6 +72,11 @@ export function BookForm({ mode, initial }: { mode: "create" | "edit"; initial?:
 
   const [loading, setLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  // "uploading" = direct-to-Storage phase (no byte-level progress available
+  // from the Supabase upload call), "saving" = the final, now-tiny JSON
+  // request to actually create/update the book — that one still gets a
+  // real percentage via uploadWithProgress.
+  const [uploadPhase, setUploadPhase] = useState<"idle" | "uploading" | "saving">("idle");
   const [message, setMessage] = useState<string | null>(null);
 
   const [previewHtml, setPreviewHtml] = useState<string | null>(initial?.content_html ?? null);
@@ -91,10 +97,16 @@ export function BookForm({ mode, initial }: { mode: "create" | "edit"; initial?:
     async (file: File) => {
       setPreviewLoading(true);
       try {
-        const formData = new FormData();
-        formData.append("file", file);
-        formData.append("bookId", bookId);
-        const response = await fetch("/api/admin/books/preview", { method: "POST", body: formData });
+        // Uploads straight to Storage first (never through this app's own
+        // request body — see uploadFileDirect) so the preview endpoint only
+        // ever needs a `bookId` reference back, regardless of the file's
+        // real size.
+        await uploadFileDirect("docx", bookId, file);
+        const response = await fetch("/api/admin/books/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ bookId }),
+        });
         const result = await response.json();
         if (result.ok) {
           setPreviewHtml(result.preview.html);
@@ -102,8 +114,8 @@ export function BookForm({ mode, initial }: { mode: "create" | "edit"; initial?:
         } else {
           setPreviewWarnings([result.error ?? "미리보기 변환에 실패했습니다."]);
         }
-      } catch {
-        setPreviewWarnings(["미리보기 변환 중 오류가 발생했습니다."]);
+      } catch (err) {
+        setPreviewWarnings([err instanceof Error ? err.message : "미리보기 변환 중 오류가 발생했습니다."]);
       } finally {
         setPreviewLoading(false);
       }
@@ -175,25 +187,37 @@ export function BookForm({ mode, initial }: { mode: "create" | "edit"; initial?:
 
     setLoading(true);
     setMessage(null);
-    setUploadProgress(selectedFile || coverFile ? 0 : null);
-
-    const formData = new FormData();
-    if (mode === "create") formData.append("id", bookId);
-    formData.append("title", title);
-    formData.append("author", author);
-    formData.append("summary", summary);
-    if (slug) formData.append("slug", slug);
-    formData.append("status", status);
-    formData.append("visibility", visibility);
-    formData.append("allow_share", String(allowShare));
-    formData.append("allow_download", String(allowDownload));
-    if (publishedAt) formData.append("published_at", publishedAt);
-    if (selectedFile) formData.append("file", selectedFile);
-    if (coverFile) formData.append("cover", coverFile);
-    categoryIds.forEach((id) => formData.append("category_ids", id));
-    tagIds.forEach((id) => formData.append("tag_ids", id));
 
     try {
+      // Upload straight to Storage first — see uploadFileDirect for why:
+      // routing large files through this app's own API request body hits
+      // Vercel's 4.5MB Serverless Function limit long before our own
+      // (much larger) documented DOCX/cover size limits do.
+      if (selectedFile || coverFile) {
+        setUploadPhase("uploading");
+        if (selectedFile) await uploadFileDirect("docx", bookId, selectedFile);
+        if (coverFile) await uploadFileDirect("cover", bookId, coverFile);
+      }
+
+      setUploadPhase("saving");
+      setUploadProgress(0);
+
+      const formData = new FormData();
+      if (mode === "create") formData.append("id", bookId);
+      formData.append("title", title);
+      formData.append("author", author);
+      formData.append("summary", summary);
+      if (slug) formData.append("slug", slug);
+      formData.append("status", status);
+      formData.append("visibility", visibility);
+      formData.append("allow_share", String(allowShare));
+      formData.append("allow_download", String(allowDownload));
+      if (publishedAt) formData.append("published_at", publishedAt);
+      if (selectedFile) formData.append("has_file", "true");
+      if (coverFile) formData.append("has_cover", "true");
+      categoryIds.forEach((id) => formData.append("category_ids", id));
+      tagIds.forEach((id) => formData.append("tag_ids", id));
+
       const url = mode === "create" ? "/api/admin/books" : `/api/admin/books/${bookId}`;
       const method = mode === "create" ? "POST" : "PATCH";
       const { ok, body } = await uploadWithProgress(method, url, formData, setUploadProgress);
@@ -218,6 +242,7 @@ export function BookForm({ mode, initial }: { mode: "create" | "edit"; initial?:
     } finally {
       setLoading(false);
       setUploadProgress(null);
+      setUploadPhase("idle");
     }
   }
 
@@ -274,7 +299,15 @@ export function BookForm({ mode, initial }: { mode: "create" | "edit"; initial?:
           )}
           {fileError && <p className="mt-3 text-sm text-red-600">{fileError}</p>}
 
-          {uploadProgress !== null && (
+          {uploadPhase === "uploading" && (
+            <div className="mt-4">
+              <div className="h-2 w-full overflow-hidden rounded-full bg-ink/10">
+                <div className="h-full w-full animate-pulse rounded-full bg-accent" />
+              </div>
+              <p className="mt-1 text-xs text-ink/60">파일 업로드 중...</p>
+            </div>
+          )}
+          {uploadPhase === "saving" && uploadProgress !== null && (
             <div className="mt-4">
               <div className="h-2 w-full overflow-hidden rounded-full bg-ink/10">
                 <div className="h-full rounded-full bg-accent transition-[width]" style={{ width: `${uploadProgress}%` }} />

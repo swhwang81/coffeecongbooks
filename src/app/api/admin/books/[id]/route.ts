@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createServiceRoleSupabaseClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/auth/server";
-import { validateDocxFile, DOCX_VALIDATION_MESSAGES, DOCX_MIME_TYPE } from "@/lib/upload/docx";
-import { validateCoverFile, COVER_VALIDATION_MESSAGES } from "@/lib/upload/image";
+import { MAX_DOCX_SIZE_BYTES, DOCX_VALIDATION_MESSAGES } from "@/lib/upload/docx";
+import { MAX_COVER_SIZE_BYTES, COVER_VALIDATION_MESSAGES } from "@/lib/upload/image";
 import { uploadCoverImage } from "@/lib/upload/cover";
 import { convertDocxToBookContent, DocxConversionError } from "@/lib/docx/convert";
 
@@ -70,8 +70,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
   try {
     const formData = await request.formData();
-    const uploadedFile = formData.get("file") instanceof File ? (formData.get("file") as File) : null;
-    const coverFile = formData.get("cover") instanceof File ? (formData.get("cover") as File) : null;
+    // Bytes already live in Storage (client uploaded them directly via a
+    // signed URL — see /api/admin/books/upload-url) — these just say
+    // "yes, go fetch and re-process what's there."
+    const hasFile = formData.get("has_file") === "true";
+    const hasCover = formData.get("has_cover") === "true";
     const hasCategoryIds = formData.has("category_ids");
     const hasTagIds = formData.has("tag_ids");
     const categoryIds = formData.getAll("category_ids").map(String).filter(Boolean);
@@ -94,19 +97,6 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
     }
     const body = parsed.data;
-
-    if (uploadedFile) {
-      const fileError = validateDocxFile(uploadedFile);
-      if (fileError) {
-        return NextResponse.json({ error: DOCX_VALIDATION_MESSAGES[fileError] }, { status: 400 });
-      }
-    }
-    if (coverFile) {
-      const coverError = validateCoverFile(coverFile);
-      if (coverError) {
-        return NextResponse.json({ error: COVER_VALIDATION_MESSAGES[coverError] }, { status: 400 });
-      }
-    }
 
     const supabase = createServiceRoleSupabaseClient();
     if (!supabase) {
@@ -164,29 +154,55 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
     const warnings: string[] = [];
 
-    if (uploadedFile && uploadedFile.size > 0) {
-      const fileBuffer = Buffer.from(await uploadedFile.arrayBuffer());
-
-      const { error: uploadError } = await supabase.storage
+    // Bytes already live at `book-originals/{id}/original.docx` — the
+    // client PUT them there directly via a signed URL (see
+    // /api/admin/books/upload-url), same as create's POST handler.
+    if (hasFile) {
+      const { data: docxBlob, error: downloadError } = await supabase.storage
         .from("book-originals")
-        .upload(`${id}/original.docx`, fileBuffer, { contentType: DOCX_MIME_TYPE, upsert: true });
-      if (uploadError) warnings.push("원본 파일 저장에 실패했습니다.");
+        .download(`${id}/original.docx`);
 
-      try {
-        const converted = await convertDocxToBookContent(fileBuffer, id, supabase);
-        updatePayload.content_html = converted.html;
-        updatePayload.content_json = converted.blocks;
-        updatePayload.toc_json = converted.toc;
-        warnings.push(...converted.warnings);
-      } catch (err) {
-        warnings.push(err instanceof DocxConversionError ? err.message : "DOCX 변환에 실패했습니다.");
+      if (downloadError || !docxBlob) {
+        warnings.push("업로드된 DOCX 파일을 찾을 수 없습니다.");
+      } else {
+        const fileBuffer = Buffer.from(await docxBlob.arrayBuffer());
+
+        if (fileBuffer.byteLength > MAX_DOCX_SIZE_BYTES) {
+          warnings.push(DOCX_VALIDATION_MESSAGES.size);
+        } else {
+          try {
+            const converted = await convertDocxToBookContent(fileBuffer, id, supabase);
+            updatePayload.content_html = converted.html;
+            updatePayload.content_json = converted.blocks;
+            updatePayload.toc_json = converted.toc;
+            warnings.push(...converted.warnings);
+          } catch (err) {
+            warnings.push(err instanceof DocxConversionError ? err.message : "DOCX 변환에 실패했습니다.");
+          }
+        }
       }
     }
 
-    if (coverFile && coverFile.size > 0) {
-      const coverResult = await uploadCoverImage(supabase, id, coverFile);
-      if (coverResult.warning) warnings.push(coverResult.warning);
-      if (coverResult.url) updatePayload.cover_url = coverResult.url;
+    if (hasCover) {
+      // book-covers, not book-originals — that bucket's MIME allow-list is
+      // locked to the DOCX type only, see /api/admin/books/upload-url.
+      const { data: coverBlob, error: coverDownloadError } = await supabase.storage
+        .from("book-covers")
+        .download(`${id}/cover-staging`);
+
+      if (coverDownloadError || !coverBlob) {
+        warnings.push("업로드된 표지 이미지를 찾을 수 없습니다.");
+      } else {
+        const coverBuffer = Buffer.from(await coverBlob.arrayBuffer());
+
+        if (coverBuffer.byteLength > MAX_COVER_SIZE_BYTES) {
+          warnings.push(COVER_VALIDATION_MESSAGES.size);
+        } else {
+          const coverResult = await uploadCoverImage(supabase, id, coverBuffer);
+          if (coverResult.warning) warnings.push(coverResult.warning);
+          if (coverResult.url) updatePayload.cover_url = coverResult.url;
+        }
+      }
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

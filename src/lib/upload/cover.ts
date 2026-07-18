@@ -6,14 +6,20 @@ export interface UploadCoverResult {
   warning: string | null;
 }
 
-/** Uploads a cover image to `book-covers/{bookId}/cover.webp` (spec §8 recommended path). */
+/**
+ * Uploads a cover image to `book-covers/{bookId}/cover.webp` (spec §8
+ * recommended path). Takes the raw bytes directly (a `Buffer`) rather than
+ * a browser `File` — the caller downloads the admin's actual upload from
+ * its Storage staging path (see `/api/admin/books/upload-url`) rather than
+ * reading it out of the request body, so there's no `File` object on this
+ * side of the request at all.
+ */
 export async function uploadCoverImage(
   supabase: SupabaseClient,
   bookId: string,
-  file: File
+  original: Buffer
 ): Promise<UploadCoverResult> {
   try {
-    const original = Buffer.from(await file.arrayBuffer());
     const webp = await sharp(original).webp({ quality: 85 }).toBuffer();
 
     const { error } = await supabase.storage.from("book-covers").upload(`${bookId}/cover.webp`, webp, {

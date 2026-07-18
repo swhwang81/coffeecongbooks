@@ -10,6 +10,7 @@ import { usePagination } from "@/lib/reader/use-pagination";
 import { findPageForPosition } from "@/lib/reader/measure-paginate";
 import { PAGE_PADDING_CLASS, READER_CONTENT_CLASS, PAGE_FOOTER_CLASS } from "@/lib/reader/page-layout";
 import { loadReaderSettings, saveReaderSettings, loadReaderPosition, saveReaderPosition } from "@/lib/reader/settings-storage";
+import { withChapterNumbers } from "@/lib/reader/chapter-numbers";
 import { ReaderToolbar } from "./reader-toolbar";
 import { ReaderBottomBar } from "./reader-bottom-bar";
 import { ReaderToc } from "./reader-toc";
@@ -167,8 +168,10 @@ export function Reader({ book }: { book: ReaderBookData }) {
     return () => document.removeEventListener("fullscreenchange", handleFsChange);
   }, []);
 
+  const numberedBlocks = useMemo(() => withChapterNumbers(book.blocks, book.toc), [book.blocks, book.toc]);
+
   const { pages, blockIdToPage, pageBox } = usePagination({
-    blocks: book.blocks,
+    blocks: numberedBlocks,
     wrapperRef,
     isDesktop,
     fontSize,

@@ -38,6 +38,11 @@ const CENTER_TAP_MAX_PX = 10;
 const CENTER_SWIPE_MIN_PX = 50;
 const CENTER_SWIPE_MIN_WIDTH_RATIO = 0.15;
 
+// Left/right stationary-tap fallback range — see the comment above
+// `sideDragRef` in `Reader` for why this specific 6–20px band exists.
+const SIDE_TAP_FALLBACK_MIN_PX = 6;
+const SIDE_TAP_FALLBACK_MAX_PX = 20;
+
 const DESKTOP_MIN_FONT_SIZE = 15;
 // Spec §11 "모바일: 최소 본문 17px" — mobile never goes below this, even
 // via the A- stepper.
@@ -338,6 +343,55 @@ export function Reader({ book }: { book: ReaderBookData }) {
     centerDragRef.current = null;
   }, []);
 
+  // Left/right stationary-tap fallback. react-pageflip's own click-vs-drag
+  // split (`App.userMove` in node_modules/page-flip) is a hard 5px:
+  // `GetDistanceBetweenTwoPoint(...) > 5` is the *only* condition that
+  // pushes it off its click path (`flip()`, an animated navigate that
+  // "just works") and onto its drag path (`fold()` + `stopMove()`)
+  // instead. A real touch tap routinely moves more than 5px by accident,
+  // and a few stray pixels never reaches the ~50%-of-page-width distance
+  // `stopMove()` needs to *commit* a drag — so it silently springs back
+  // with no navigation at all. From the outside this reads as "tapping
+  // left/right does nothing," even though swiping (which clears that
+  // distance) works fine.
+  //
+  // This fallback targets exactly that gap: movement clearly past
+  // react-pageflip's own 5px click threshold, but still short of a real
+  // swipe, fires our own `goPrev`/`goNext` directly. Below the lower bound,
+  // react-pageflip's own click path is guaranteed to have been taken (it
+  // needs no help); above the upper bound, it's a real swipe attempt, left
+  // entirely to react-pageflip's native drag-fold pipeline. No delay or
+  // "did it already navigate" check is needed — the two ranges are
+  // mutually exclusive by construction, so there's no double-flip risk.
+  const sideDragRef = useRef<{ x: number; y: number; zone: "left" | "right" } | null>(null);
+
+  const handlePageAreaPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest("a")) return;
+    const rect = pageAreaRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = e.clientX - rect.left;
+    const third = rect.width / 3;
+    if (x >= third && x <= third * 2) return; // center third is handled entirely by its own overlay
+    sideDragRef.current = { x: e.clientX, y: e.clientY, zone: x < third ? "left" : "right" };
+  }, []);
+
+  const handlePageAreaPointerUp = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      const start = sideDragRef.current;
+      sideDragRef.current = null;
+      if (!start) return;
+      const distance = Math.hypot(e.clientX - start.x, e.clientY - start.y);
+      if (distance < SIDE_TAP_FALLBACK_MIN_PX || distance > SIDE_TAP_FALLBACK_MAX_PX) return;
+      if (start.zone === "left") goPrev();
+      else goNext();
+    },
+    [goPrev, goNext]
+  );
+
+  const handlePageAreaPointerCancel = useCallback(() => {
+    sideDragRef.current = null;
+  }, []);
+
   // page-flip.js's flip(page)/flipToPage() only ever animates ONE spread
   // step: it silently teleports `currentSpreadIndex` to `next - 1` and then
   // calls flipNext()/flipPrev() once (Flip.flipToPage), so jumps spanning
@@ -567,7 +621,13 @@ export function Reader({ book }: { book: ReaderBookData }) {
             </button>
           )}
 
-          <div ref={pageAreaRef} className="relative h-full max-h-[720px] w-full max-w-5xl">
+          <div
+            ref={pageAreaRef}
+            onPointerDown={handlePageAreaPointerDown}
+            onPointerUp={handlePageAreaPointerUp}
+            onPointerCancel={handlePageAreaPointerCancel}
+            className="relative h-full max-h-[720px] w-full max-w-5xl"
+          >
             {pageBox && (
               <HTMLFlipBook
                 key={flipbookKey}

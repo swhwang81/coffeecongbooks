@@ -4,6 +4,12 @@ import { createServiceRoleSupabaseClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/auth/server";
 import { convertDocxToBookContent, DocxConversionError } from "@/lib/docx/convert";
 
+// See the identical comment in ../route.ts — this re-runs the full
+// conversion (incl. per-image compression + Storage upload), which can
+// exceed Vercel's default Serverless Function timeout for a document with
+// several real photos.
+export const maxDuration = 60;
+
 /** Re-runs the DOCX→HTML pipeline against the already-stored original (no re-upload). */
 export async function POST(_request: Request, context: { params: Promise<{ id: string }> }) {
   const auth = await requireAdmin();

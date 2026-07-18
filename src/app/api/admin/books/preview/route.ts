@@ -5,6 +5,12 @@ import { requireAdmin } from "@/lib/auth/server";
 import { validateDocxFile, DOCX_VALIDATION_MESSAGES } from "@/lib/upload/docx";
 import { convertDocxToBookContent, DocxConversionError } from "@/lib/docx/convert";
 
+// See the identical comment in ../route.ts — this does the exact same full
+// conversion (incl. per-image compression + Storage upload), which can
+// exceed Vercel's default Serverless Function timeout for a document with
+// several real photos.
+export const maxDuration = 60;
+
 /**
  * Converts the admin's actually-selected DOCX before the book is saved
  * (spec §14 "등록 전 미리보기" — a preview of *this* file, not a fixed

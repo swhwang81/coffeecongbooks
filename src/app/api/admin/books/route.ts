@@ -12,6 +12,17 @@ import { buildSlug } from "@/lib/admin/slug";
 
 const require = createRequire(import.meta.url);
 
+// DOCX conversion synchronously compresses/uploads every embedded image
+// (sharp + Supabase Storage, one round-trip per image) before responding —
+// a document with several real photos can easily exceed Vercel's default
+// Serverless Function timeout, which kills the function and returns its
+// own error page instead of this route's normal `{ok, error}` JSON. The
+// client then falls back to a generic "저장에 실패했습니다." with no real
+// diagnostic, which is exactly what that looks like from the outside. 60s
+// is the maximum configurable on Vercel's Hobby plan and comfortably
+// within Pro's default — safe regardless of which tier this is deployed on.
+export const maxDuration = 60;
+
 const schema = z.object({
   id: z.string().uuid().optional(),
   title: z.string().min(1),

@@ -7,6 +7,14 @@ import { validateCoverFile, COVER_VALIDATION_MESSAGES } from "@/lib/upload/image
 import { uploadCoverImage } from "@/lib/upload/cover";
 import { convertDocxToBookContent, DocxConversionError } from "@/lib/docx/convert";
 
+// See the identical comment in ../route.ts — PATCH re-runs the full DOCX
+// conversion (incl. per-image compression + Storage upload) synchronously,
+// which can exceed Vercel's default Serverless Function timeout for a
+// document with several real photos. This config applies to every method
+// in this file; GET/DELETE are unaffected since they were never anywhere
+// close to the previous, much shorter default.
+export const maxDuration = 60;
+
 const updateSchema = z.object({
   title: z.string().min(1).optional(),
   author: z.string().optional().or(z.literal("")),

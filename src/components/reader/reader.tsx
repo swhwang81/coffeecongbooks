@@ -39,9 +39,15 @@ const CENTER_SWIPE_MIN_PX = 50;
 const CENTER_SWIPE_MIN_WIDTH_RATIO = 0.15;
 
 // Left/right stationary-tap fallback range — see the comment above
-// `sideDragRef` in `Reader` for why this specific 6–20px band exists.
+// `sideDragRef` in `Reader` for why this specific 6–20px band exists (mouse)
+// and why touch/pen use a different rule entirely.
 const SIDE_TAP_FALLBACK_MIN_PX = 6;
 const SIDE_TAP_FALLBACK_MAX_PX = 20;
+// react-pageflip's own touch handling (`UI.onTouchStart` in
+// node_modules/page-flip) arms its click path on a delay equal to its
+// internal `swipeTimeout` (250ms) — matched here so we know precisely when
+// that arming has *not* happened yet.
+const TOUCH_CLICK_ARM_DELAY_MS = 250;
 
 const DESKTOP_MIN_FONT_SIZE = 15;
 // Spec §11 "모바일: 최소 본문 17px" — mobile never goes below this, even
@@ -343,27 +349,34 @@ export function Reader({ book }: { book: ReaderBookData }) {
     centerDragRef.current = null;
   }, []);
 
-  // Left/right stationary-tap fallback. react-pageflip's own click-vs-drag
-  // split (`App.userMove` in node_modules/page-flip) is a hard 5px:
-  // `GetDistanceBetweenTwoPoint(...) > 5` is the *only* condition that
-  // pushes it off its click path (`flip()`, an animated navigate that
-  // "just works") and onto its drag path (`fold()` + `stopMove()`)
-  // instead. A real touch tap routinely moves more than 5px by accident,
-  // and a few stray pixels never reaches the ~50%-of-page-width distance
-  // `stopMove()` needs to *commit* a drag — so it silently springs back
-  // with no navigation at all. From the outside this reads as "tapping
-  // left/right does nothing," even though swiping (which clears that
-  // distance) works fine.
+  // Left/right stationary-tap fallback. react-pageflip's click-vs-drag
+  // handling is entirely different for mouse vs. touch, and both need help:
   //
-  // This fallback targets exactly that gap: movement clearly past
-  // react-pageflip's own 5px click threshold, but still short of a real
-  // swipe, fires our own `goPrev`/`goNext` directly. Below the lower bound,
-  // react-pageflip's own click path is guaranteed to have been taken (it
-  // needs no help); above the upper bound, it's a real swipe attempt, left
-  // entirely to react-pageflip's native drag-fold pipeline. No delay or
-  // "did it already navigate" check is needed — the two ranges are
-  // mutually exclusive by construction, so there's no double-flip risk.
-  const sideDragRef = useRef<{ x: number; y: number; zone: "left" | "right" } | null>(null);
+  // Mouse: the click-vs-drag split (`App.userMove`) is a hard 5px —
+  // `GetDistanceBetweenTwoPoint(...) > 5` is the only thing that pushes it
+  // off its click path (`flip()`, animated, works fine) onto its drag path
+  // (`fold()` + `stopMove()`) instead. A click with a few stray pixels of
+  // movement never reaches the ~50%-of-page-width distance `stopMove()`
+  // needs to *commit* a drag, so it silently springs back with nothing
+  // happening. Our fallback covers exactly that 5–20px gap; react-pageflip
+  // handles ≤5px and >20px correctly on its own.
+  //
+  // Touch: `UI.onTouchStart` doesn't call `startUserTouch` (which arms the
+  // click/drag state machine at all) immediately — it defers it via
+  // `setTimeout(..., swipeTimeout)`, 250ms. A real tap almost always
+  // releases well before that fires, so `userStop` on `touchend` finds
+  // `isUserTouch` still `false` and does *nothing at all* — not even a
+  // spring-back, react-pageflip's whole click path is simply unreachable
+  // for a normal quick tap. Its *swipe* still works, via a separate
+  // fast-path check in `onTouchEnd` that doesn't depend on that same
+  // deferred arming. So for touch we own the *entire* tap range (not just
+  // a gap), but only while still inside that same 250ms window — once
+  // react-pageflip's deferred arming has actually happened, its own click
+  // path takes over, and backing off there avoids double-firing on a slow,
+  // deliberate tap-and-hold.
+  const sideDragRef = useRef<{ x: number; y: number; zone: "left" | "right"; time: number; pointerType: string } | null>(
+    null
+  );
 
   const handlePageAreaPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if ((e.target as HTMLElement).closest("a")) return;
@@ -372,7 +385,7 @@ export function Reader({ book }: { book: ReaderBookData }) {
     const x = e.clientX - rect.left;
     const third = rect.width / 3;
     if (x >= third && x <= third * 2) return; // center third is handled entirely by its own overlay
-    sideDragRef.current = { x: e.clientX, y: e.clientY, zone: x < third ? "left" : "right" };
+    sideDragRef.current = { x: e.clientX, y: e.clientY, zone: x < third ? "left" : "right", time: Date.now(), pointerType: e.pointerType };
   }, []);
 
   const handlePageAreaPointerUp = useCallback(
@@ -380,8 +393,14 @@ export function Reader({ book }: { book: ReaderBookData }) {
       const start = sideDragRef.current;
       sideDragRef.current = null;
       if (!start) return;
+
       const distance = Math.hypot(e.clientX - start.x, e.clientY - start.y);
-      if (distance < SIDE_TAP_FALLBACK_MIN_PX || distance > SIDE_TAP_FALLBACK_MAX_PX) return;
+      const isFallbackTap =
+        start.pointerType === "mouse"
+          ? distance > SIDE_TAP_FALLBACK_MIN_PX && distance <= SIDE_TAP_FALLBACK_MAX_PX
+          : distance <= SIDE_TAP_FALLBACK_MAX_PX && Date.now() - start.time < TOUCH_CLICK_ARM_DELAY_MS;
+
+      if (!isFallbackTap) return;
       if (start.zone === "left") goPrev();
       else goNext();
     },
